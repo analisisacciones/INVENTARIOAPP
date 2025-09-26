@@ -164,3 +164,6 @@ with tab_hist:
         log_view = log_view[log_view["accion"] == f_acc]
 
     st.dataframe(log_view.sort_values("hora", ascending=False), use_container_width=True)
+    # Inventario Académico
+App en Streamlit con login de 10 usuarios y control de materiales.
+
