@@ -11,11 +11,14 @@ st.set_page_config(page_title="Inventario Académico", page_icon="📦", layout=
 DATA_DIR = "data"
 INV_FILE = os.path.join(DATA_DIR, "inventario.csv")
 LOG_FILE = os.path.join(DATA_DIR, "movimientos.csv")
+USERS_FILE = os.path.join(DATA_DIR, "users.csv")
 
-# 10 usuarios predefinidos (cámbialos si quieres)
-USERS = {f"usuario{i}": f"pass{i}" for i in range(1, 11)}
+# Usuarios iniciales (solo se crean si no existe users.csv)
+DEFAULT_USERS = [
+    {"usuario": "teniente", "password": "jefe1", "nombre": "Teniente"},
+    {"usuario": "parquista", "password": "encargado1", "nombre": "Parquista"}
+]
 
-# Inventario de ejemplo (se puede sustituir luego por CSV real)
 INVENTARIO_BASE = [
     {"material": "Pala inglesa", "cantidad_total": 10, "en_parque": 10, "fuera_parque": 0, "unidad": "uds"},
     {"material": "Zapapico (mango corto)", "cantidad_total": 16, "en_parque": 16, "fuera_parque": 0, "unidad": "uds"},
@@ -26,6 +29,7 @@ INVENTARIO_BASE = [
 
 INV_COLS = ["material", "cantidad_total", "en_parque", "fuera_parque", "unidad"]
 LOG_COLS = ["usuario", "material", "cantidad", "accion", "hora", "observacion"]
+USER_COLS = ["usuario", "password", "nombre"]
 
 # =========================
 # Funciones de datos
@@ -36,57 +40,95 @@ def init_data():
         pd.DataFrame(INVENTARIO_BASE, columns=INV_COLS).to_csv(INV_FILE, index=False)
     if not os.path.exists(LOG_FILE):
         pd.DataFrame(columns=LOG_COLS).to_csv(LOG_FILE, index=False)
+    if not os.path.exists(USERS_FILE):
+        pd.DataFrame(DEFAULT_USERS, columns=USER_COLS).to_csv(USERS_FILE, index=False)
 
-def load_inventory() -> pd.DataFrame:
+def load_inventory():
     return pd.read_csv(INV_FILE)
 
-def save_inventory(df: pd.DataFrame):
+def save_inventory(df):
     df.to_csv(INV_FILE, index=False)
 
-def load_log() -> pd.DataFrame:
+def load_log():
     return pd.read_csv(LOG_FILE)
 
-def save_log(df: pd.DataFrame):
+def save_log(df):
     df.to_csv(LOG_FILE, index=False)
+
+def load_users():
+    return pd.read_csv(USERS_FILE)
+
+def save_users(df):
+    df.to_csv(USERS_FILE, index=False)
 
 # Inicializa almacenamiento
 init_data()
 
 # =========================
-# Login
+# Login / Registro
 # =========================
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
     st.session_state.user = None
+    st.session_state.name = None
 
 st.title("📦 Inventario Académico — Control de Parque")
 
 if not st.session_state.logged_in:
-    st.subheader("Inicia sesión")
-    usuario = st.selectbox("Usuario", list(USERS.keys()))
-    password = st.text_input("Contraseña", type="password")
-    if st.button("Entrar", use_container_width=True):
-        if USERS.get(usuario) == password:
-            st.session_state.logged_in = True
-            st.session_state.user = usuario
-            st.success(f"Bienvenido {usuario}")
-        else:
-            st.error("Usuario o contraseña incorrectos")
-    st.stop()
+    tab_login, tab_register = st.tabs(["🔑 Iniciar sesión", "📝 Registrarse"])
 
-st.sidebar.success(f"Conectado como {st.session_state.user}")
-if st.sidebar.button("Cerrar sesión"):
-    st.session_state.logged_in = False
-    st.session_state.user = None
-    st.rerun()
+    with tab_login:
+        st.subheader("Inicia sesión")
+        users = load_users()
+        usuario = st.text_input("Usuario")
+        password = st.text_input("Contraseña", type="password")
+        if st.button("Entrar", use_container_width=True):
+            if ((users["usuario"] == usuario) & (users["password"] == password)).any():
+                st.session_state.logged_in = True
+                st.session_state.user = usuario
+                st.session_state.name = users.loc[users["usuario"] == usuario, "nombre"].values[0]
+                st.success(f"Bienvenido {st.session_state.name}")
+            else:
+                st.error("Usuario o contraseña incorrectos")
+
+    with tab_register:
+        st.subheader("Registro de nuevo usuario")
+        new_user = st.text_input("Nuevo usuario")
+        new_pass = st.text_input("Nueva contraseña", type="password")
+        new_name = st.text_input("Nombre completo")
+        if st.button("Registrar", use_container_width=True):
+            users = load_users()
+            if new_user in users["usuario"].values:
+                st.error("Ese usuario ya existe")
+            elif new_user.strip() == "" or new_pass.strip() == "" or new_name.strip() == "":
+                st.error("Todos los campos son obligatorios")
+            else:
+                new_entry = pd.DataFrame([[new_user, new_pass, new_name]], columns=USER_COLS)
+                users = pd.concat([users, new_entry], ignore_index=True)
+                save_users(users)
+                st.success("Usuario registrado con éxito. Ahora puedes iniciar sesión.")
+
+    st.stop()
 
 # =========================
 # App principal
 # =========================
+st.sidebar.success(f"Conectado como {st.session_state.name} ({st.session_state.user})")
+if st.sidebar.button("Cerrar sesión"):
+    st.session_state.logged_in = False
+    st.session_state.user = None
+    st.session_state.name = None
+    st.rerun()
+
 inv = load_inventory()
 log = load_log()
 
-tab_inv, tab_mov, tab_hist = st.tabs(["📋 Inventario", "🔁 Movimientos", "📝 Historial"])
+# Tabs (el historial solo visible a teniente y parquista)
+if st.session_state.user in ["teniente", "parquista"]:
+    tab_inv, tab_mov, tab_hist = st.tabs(["📋 Inventario", "🔁 Movimientos", "📝 Historial"])
+else:
+    tab_inv, tab_mov = st.tabs(["📋 Inventario", "🔁 Movimientos"])
+    tab_hist = None
 
 # -------- Inventario
 with tab_inv:
@@ -114,16 +156,16 @@ with tab_mov:
         idx = inv.index[inv["material"] == material][0]
         if accion == "Sacar":
             if int(inv.loc[idx, "en_parque"]) >= cant:
-                inv.loc[idx, "en_parque"] = int(inv.loc[idx, "en_parque"]) - int(cant)
-                inv.loc[idx, "fuera_parque"] = int(inv.loc[idx, "fuera_parque"]) + int(cant)
+                inv.loc[idx, "en_parque"] -= int(cant)
+                inv.loc[idx, "fuera_parque"] += int(cant)
                 st.success(f"Sacaste {cant} {material}")
             else:
                 st.error("No hay suficiente stock en parque")
                 st.stop()
         else:  # Devolver
             if int(inv.loc[idx, "fuera_parque"]) >= cant:
-                inv.loc[idx, "fuera_parque"] = int(inv.loc[idx, "fuera_parque"]) - int(cant)
-                inv.loc[idx, "en_parque"] = int(inv.loc[idx, "en_parque"]) + int(cant)
+                inv.loc[idx, "fuera_parque"] -= int(cant)
+                inv.loc[idx, "en_parque"] += int(cant)
                 st.success(f"Devolviste {cant} {material}")
             else:
                 st.error("No hay suficiente stock fuera del parque")
@@ -142,23 +184,24 @@ with tab_mov:
         log = pd.concat([load_log(), nuevo], ignore_index=True)
         save_log(log)
 
-# -------- Historial
-with tab_hist:
-    st.subheader("Historial de movimientos")
-    colf1, colf2, colf3 = st.columns(3)
-    with colf1:
-        f_user = st.selectbox("Filtrar por usuario", ["(Todos)"] + list(USERS.keys()))
-    with colf2:
-        f_mat = st.selectbox("Filtrar por material", ["(Todos)"] + sorted(inv["material"].unique().tolist()))
-    with colf3:
-        f_acc = st.selectbox("Filtrar por acción", ["(Todas)", "Sacar", "Devolver"])
+# -------- Historial (solo jefes)
+if tab_hist is not None:
+    with tab_hist:
+        st.subheader("Historial de movimientos")
+        colf1, colf2, colf3 = st.columns(3)
+        with colf1:
+            f_user = st.selectbox("Filtrar por usuario", ["(Todos)"] + log["usuario"].unique().tolist())
+        with colf2:
+            f_mat = st.selectbox("Filtrar por material", ["(Todos)"] + sorted(inv["material"].unique().tolist()))
+        with colf3:
+            f_acc = st.selectbox("Filtrar por acción", ["(Todas)", "Sacar", "Devolver"])
 
-    log_view = load_log().copy()
-    if f_user != "(Todos)":
-        log_view = log_view[log_view["usuario"] == f_user]
-    if f_mat != "(Todos)":
-        log_view = log_view[log_view["material"] == f_mat]
-    if f_acc != "(Todas)":
-        log_view = log_view[log_view["accion"] == f_acc]
+        log_view = load_log().copy()
+        if f_user != "(Todos)":
+            log_view = log_view[log_view["usuario"] == f_user]
+        if f_mat != "(Todos)":
+            log_view = log_view[log_view["material"] == f_mat]
+        if f_acc != "(Todas)":
+            log_view = log_view[log_view["accion"] == f_acc]
 
-    st.dataframe(log_view.sort_values("hora", ascending=False), use_container_width=True)
+        st.dataframe(log_view.sort_values("hora", ascending=False), use_container_width=True)
