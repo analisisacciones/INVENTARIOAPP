@@ -17,11 +17,10 @@ INV_FILE = os.path.join(DATA_DIR, "inventario.csv")
 LOG_FILE = os.path.join(DATA_DIR, "movimientos.csv")
 USERS_FILE = os.path.join(DATA_DIR, "users.csv")
 
-# Credenciales de Gmail (usa variables de entorno en producción)
-EMAIL_ADDRESS = "parquezapadores@gmail.com"
-EMAIL_PASSWORD = "xtnn qkmw vzmh mtha"  # contraseña de aplicación
+EMAIL_ADDRESS = st.secrets["EMAIL_ADDRESS"]
+EMAIL_PASSWORD = st.secrets["EMAIL_PASSWORD"]
+BASE_URL = st.secrets["BASE_URL"]
 
-# Usuarios iniciales
 DEFAULT_USERS = [
     {"usuario": "teniente", "password": "jefe1", "nombre": "Teniente", "correo": ""},
     {"usuario": "parquista", "password": "encargado1", "nombre": "Parquista", "correo": ""}
@@ -51,29 +50,17 @@ def init_data():
     if not os.path.exists(USERS_FILE):
         pd.DataFrame(DEFAULT_USERS, columns=USER_COLS).to_csv(USERS_FILE, index=False)
 
-def load_inventory():
-    return pd.read_csv(INV_FILE)
+def load_inventory(): return pd.read_csv(INV_FILE)
+def save_inventory(df): df.to_csv(INV_FILE, index=False)
+def load_log(): return pd.read_csv(LOG_FILE)
+def save_log(df): df.to_csv(LOG_FILE, index=False)
+def load_users(): return pd.read_csv(USERS_FILE)
+def save_users(df): df.to_csv(USERS_FILE, index=False)
 
-def save_inventory(df):
-    df.to_csv(INV_FILE, index=False)
-
-def load_log():
-    return pd.read_csv(LOG_FILE)
-
-def save_log(df):
-    df.to_csv(LOG_FILE, index=False)
-
-def load_users():
-    return pd.read_csv(USERS_FILE)
-
-def save_users(df):
-    df.to_csv(USERS_FILE, index=False)
-
-# Inicializa almacenamiento
 init_data()
 
 # =========================
-# Envío de correo
+# Envío de correos
 # =========================
 def send_recovery_email(to_email, token):
     try:
@@ -82,7 +69,7 @@ def send_recovery_email(to_email, token):
         msg["To"] = to_email
         msg["Subject"] = "Recuperación de contraseña - Parque de zapadores IIScc"
 
-        reset_link = f"{st.secrets['general']['app_url']}?reset={token}"
+        reset_link = f"{BASE_URL}?reset={token}"
         body = f"Haz clic en el siguiente enlace para restablecer tu contraseña:\n\n{reset_link}"
         msg.attach(MIMEText(body, "plain"))
 
@@ -111,6 +98,7 @@ if "reset_tokens" not in st.session_state:
 if not st.session_state.logged_in:
     tab_login, tab_register, tab_reset = st.tabs(["🔑 Iniciar sesión", "📝 Registrarse", "🔄 Cambiar contraseña"])
 
+    # ---- Login
     with tab_login:
         st.subheader("Inicia sesión")
         users = load_users()
@@ -126,6 +114,7 @@ if not st.session_state.logged_in:
             else:
                 st.error("Usuario o contraseña incorrectos")
 
+    # ---- Registro
     with tab_register:
         st.subheader("Registro de nuevo usuario")
         new_user = st.text_input("Nuevo usuario")
@@ -146,6 +135,7 @@ if not st.session_state.logged_in:
                 save_users(users)
                 st.success("Usuario registrado con éxito. Ahora puedes iniciar sesión.")
 
+    # ---- Recuperación
     with tab_reset:
         st.subheader("Recuperar contraseña")
         reset_user = st.text_input("Usuario para recuperar contraseña")
@@ -163,10 +153,10 @@ if not st.session_state.logged_in:
             else:
                 st.error("Usuario no encontrado")
 
-    # Procesar enlace de recuperación
-    params = st.experimental_get_query_params()
+    # ---- Link de recuperación
+    params = st.query_params
     if "reset" in params:
-        token = params["reset"][0]
+        token = params["reset"]
         if token in st.session_state.reset_tokens:
             usuario_reset = st.session_state.reset_tokens[token]
             st.subheader("🔑 Restablecer contraseña")
@@ -191,7 +181,23 @@ if st.sidebar.button("Cerrar sesión"):
     st.session_state.name = None
     st.rerun()
 
-# Configurar correo (solo Teniente y Parquista)
+# ---- Opción de borrar cuenta (solo usuarios normales)
+if st.session_state.user not in ["teniente", "parquista"]:
+    with st.sidebar.expander("⚠️ Borrar mi cuenta"):
+        st.warning("Esta acción no se puede deshacer.")
+        confirmar = st.checkbox("Estoy seguro de que quiero borrar mi cuenta")
+        if st.button("Borrar mi cuenta", type="primary"):
+            if confirmar:
+                users = load_users()
+                users = users[users["usuario"] != st.session_state.user]
+                save_users(users)
+                st.success("Tu cuenta ha sido eliminada.")
+                st.session_state.logged_in = False
+                st.rerun()
+            else:
+                st.error("Debes confirmar para borrar tu cuenta.")
+
+# ---- Configurar correo (solo teniente/parquista)
 if st.session_state.user in ["teniente", "parquista"]:
     st.sidebar.subheader("📧 Configurar correo")
     users = load_users()
@@ -207,23 +213,12 @@ if st.session_state.user in ["teniente", "parquista"]:
             save_users(users)
             st.sidebar.success("Correo actualizado con éxito ✅")
 
-# Eliminar cuenta
-st.sidebar.subheader("🗑️ Eliminar cuenta")
-if st.sidebar.button("Eliminar mi usuario"):
-    users = load_users()
-    users = users[users["usuario"] != st.session_state.user]
-    save_users(users)
-    st.sidebar.success("Tu cuenta ha sido eliminada.")
-    st.session_state.logged_in = False
-    st.session_state.user = None
-    st.session_state.name = None
-    st.rerun()
-
-# Cargar datos
+# =========================
+# Contenido principal
+# =========================
 inv = load_inventory()
 log = load_log()
 
-# Tabs
 tabs = ["📋 Inventario", "🔁 Movimientos"]
 if st.session_state.user in ["teniente", "parquista"]:
     tabs.append("📝 Historial")
@@ -232,28 +227,24 @@ if st.session_state.user == "teniente":
 
 selected_tabs = st.tabs(tabs)
 
-# -------- Inventario
+# ---- Inventario
 with selected_tabs[0]:
     st.subheader("Estado actual")
     inv_view = inv.copy()
     inv_view["disponible"] = inv_view["en_parque"]
     st.dataframe(inv_view, use_container_width=True)
     c1, c2, c3 = st.columns(3)
-    with c1:
-        st.metric("Total de materiales", len(inv_view))
-    with c2:
-        st.metric("Unidades en parque", int(inv_view["en_parque"].sum()))
-    with c3:
-        st.metric("Unidades fuera de parque", int(inv_view["fuera_parque"].sum()))
+    with c1: st.metric("Total de materiales", len(inv_view))
+    with c2: st.metric("Unidades en parque", int(inv_view["en_parque"].sum()))
+    with c3: st.metric("Unidades fuera de parque", int(inv_view["fuera_parque"].sum()))
 
-# -------- Movimientos
+# ---- Movimientos
 with selected_tabs[1]:
     st.subheader("Registrar movimiento")
     material = st.selectbox("Material", inv["material"])
     cant = st.number_input("Cantidad", min_value=1, step=1, value=1)
     accion = st.radio("Acción", ["Sacar", "Devolver"], horizontal=True)
     observ = st.text_input("Observación (opcional)", "")
-
     if st.button("Confirmar movimiento", type="primary"):
         idx = inv.index[inv["material"] == material][0]
         if accion == "Sacar":
@@ -264,7 +255,7 @@ with selected_tabs[1]:
             else:
                 st.error("No hay suficiente stock en parque")
                 st.stop()
-        else:  # Devolver
+        else:
             if int(inv.loc[idx, "fuera_parque"]) >= cant:
                 inv.loc[idx, "fuera_parque"] -= int(cant)
                 inv.loc[idx, "en_parque"] += int(cant)
@@ -272,7 +263,6 @@ with selected_tabs[1]:
             else:
                 st.error("No hay suficiente stock fuera del parque")
                 st.stop()
-
         save_inventory(inv)
         nuevo = pd.DataFrame([{
             "usuario": st.session_state.user,
@@ -285,34 +275,25 @@ with selected_tabs[1]:
         log = pd.concat([load_log(), nuevo], ignore_index=True)
         save_log(log)
 
-# -------- Historial
+# ---- Historial
 if "📝 Historial" in tabs:
     with selected_tabs[tabs.index("📝 Historial")]:
         st.subheader("Historial de movimientos")
         colf1, colf2, colf3 = st.columns(3)
-        with colf1:
-            f_user = st.selectbox("Filtrar por usuario", ["(Todos)"] + log["usuario"].unique().tolist())
-        with colf2:
-            f_mat = st.selectbox("Filtrar por material", ["(Todos)"] + sorted(inv["material"].unique().tolist()))
-        with colf3:
-            f_acc = st.selectbox("Filtrar por acción", ["(Todas)", "Sacar", "Devolver", "Editar inventario"])
-
+        with colf1: f_user = st.selectbox("Filtrar por usuario", ["(Todos)"] + log["usuario"].unique().tolist())
+        with colf2: f_mat = st.selectbox("Filtrar por material", ["(Todos)"] + sorted(inv["material"].unique().tolist()))
+        with colf3: f_acc = st.selectbox("Filtrar por acción", ["(Todas)", "Sacar", "Devolver", "Editar inventario"])
         log_view = load_log().copy()
-        if f_user != "(Todos)":
-            log_view = log_view[log_view["usuario"] == f_user]
-        if f_mat != "(Todos)":
-            log_view = log_view[log_view["material"] == f_mat]
-        if f_acc != "(Todas)":
-            log_view = log_view[log_view["accion"] == f_acc]
-
+        if f_user != "(Todos)": log_view = log_view[log_view["usuario"] == f_user]
+        if f_mat != "(Todos)": log_view = log_view[log_view["material"] == f_mat]
+        if f_acc != "(Todas)": log_view = log_view[log_view["accion"] == f_acc]
         st.dataframe(log_view.sort_values("hora", ascending=False), use_container_width=True)
 
-# -------- Gestión de materiales
+# ---- Gestión de materiales
 if "⚙️ Gestión de materiales" in tabs:
     with selected_tabs[tabs.index("⚙️ Gestión de materiales")]:
         st.subheader("Gestión de materiales (solo Teniente)")
         choice = st.radio("Acción", ["Añadir material nuevo", "Editar material existente"], horizontal=True)
-
         if choice == "Añadir material nuevo":
             new_name = st.text_input("Nombre del material")
             new_total = st.number_input("Cantidad total", min_value=1, step=1, value=1)
@@ -323,13 +304,8 @@ if "⚙️ Gestión de materiales" in tabs:
                 elif new_name in inv["material"].values:
                     st.error("Ese material ya existe")
                 else:
-                    new_row = {
-                        "material": new_name,
-                        "cantidad_total": int(new_total),
-                        "en_parque": int(new_total),
-                        "fuera_parque": 0,
-                        "unidad": new_unit
-                    }
+                    new_row = {"material": new_name, "cantidad_total": int(new_total),
+                               "en_parque": int(new_total), "fuera_parque": 0, "unidad": new_unit}
                     inv = pd.concat([inv, pd.DataFrame([new_row])], ignore_index=True)
                     save_inventory(inv)
                     log = pd.concat([log, pd.DataFrame([{
@@ -342,7 +318,6 @@ if "⚙️ Gestión de materiales" in tabs:
                     }])], ignore_index=True)
                     save_log(log)
                     st.success(f"Material '{new_name}' añadido con {new_total} {new_unit}")
-
         else:
             mat_edit = st.selectbox("Selecciona material a editar", inv["material"])
             if mat_edit:
