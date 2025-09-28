@@ -27,14 +27,14 @@ DEFAULT_USERS = [
 ]
 
 INVENTARIO_BASE = [
-    {"material": "Pala inglesa", "cantidad_total": 10, "en_parque": 10, "fuera_parque": 0, "unidad": "uds"},
-    {"material": "Zapapico (mango corto)", "cantidad_total": 16, "en_parque": 16, "fuera_parque": 0, "unidad": "uds"},
-    {"material": "Almádena", "cantidad_total": 4, "en_parque": 4, "fuera_parque": 0, "unidad": "uds"},
-    {"material": "Motosierra Stihl", "cantidad_total": 1, "en_parque": 1, "fuera_parque": 0, "unidad": "ud"},
-    {"material": "Tijera corta-alambrada zapador", "cantidad_total": 8, "en_parque": 8, "fuera_parque": 0, "unidad": "uds"},
+    {"material": "Pala inglesa", "cantidad_total": 10, "en_parque": 10, "fuera_parque": 0, "operativos": 10, "unidad": "uds"},
+    {"material": "Zapapico (mango corto)", "cantidad_total": 16, "en_parque": 16, "fuera_parque": 0, "operativos": 16, "unidad": "uds"},
+    {"material": "Almádena", "cantidad_total": 4, "en_parque": 4, "fuera_parque": 0, "operativos": 4, "unidad": "uds"},
+    {"material": "Motosierra Stihl", "cantidad_total": 1, "en_parque": 1, "fuera_parque": 0, "operativos": 1, "unidad": "ud"},
+    {"material": "Tijera corta-alambrada zapador", "cantidad_total": 8, "en_parque": 8, "fuera_parque": 0, "operativos": 8, "unidad": "uds"},
 ]
 
-INV_COLS = ["material", "cantidad_total", "en_parque", "fuera_parque", "unidad"]
+INV_COLS = ["material", "cantidad_total", "en_parque", "fuera_parque", "operativos", "unidad"]
 LOG_COLS = ["usuario", "material", "cantidad", "accion", "hora", "observacion"]
 USER_COLS = ["usuario", "password", "nombre", "correo"]
 
@@ -45,10 +45,22 @@ def init_data():
     os.makedirs(DATA_DIR, exist_ok=True)
     if not os.path.exists(INV_FILE):
         pd.DataFrame(INVENTARIO_BASE, columns=INV_COLS).to_csv(INV_FILE, index=False)
+    else:
+        df = pd.read_csv(INV_FILE)
+        if "operativos" not in df.columns:
+            df["operativos"] = df["cantidad_total"]
+        df = df[INV_COLS]
+        df.to_csv(INV_FILE, index=False)
     if not os.path.exists(LOG_FILE):
         pd.DataFrame(columns=LOG_COLS).to_csv(LOG_FILE, index=False)
     if not os.path.exists(USERS_FILE):
         pd.DataFrame(DEFAULT_USERS, columns=USER_COLS).to_csv(USERS_FILE, index=False)
+    else:
+        users = pd.read_csv(USERS_FILE)
+        if "correo" not in users.columns:
+            users["correo"] = ""
+        users = users[USER_COLS]
+        users.to_csv(USERS_FILE, index=False)
 
 def load_inventory(): return pd.read_csv(INV_FILE)
 def save_inventory(df): df.to_csv(INV_FILE, index=False)
@@ -68,11 +80,9 @@ def send_recovery_email(to_email, token):
         msg["From"] = EMAIL_ADDRESS
         msg["To"] = to_email
         msg["Subject"] = "Recuperación de contraseña - Parque de zapadores IIScc"
-
         reset_link = f"{BASE_URL}?reset={token}"
         body = f"Haz clic en el siguiente enlace para restablecer tu contraseña:\n\n{reset_link}"
         msg.attach(MIMEText(body, "plain"))
-
         with smtplib.SMTP("smtp.gmail.com", 587) as server:
             server.starttls()
             server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
@@ -97,8 +107,6 @@ if "reset_tokens" not in st.session_state:
 # =========================
 if not st.session_state.logged_in:
     tab_login, tab_register, tab_reset = st.tabs(["🔑 Iniciar sesión", "📝 Registrarse", "🔄 Cambiar contraseña"])
-
-    # ---- Login
     with tab_login:
         st.subheader("Inicia sesión")
         users = load_users()
@@ -113,8 +121,6 @@ if not st.session_state.logged_in:
                 st.rerun()
             else:
                 st.error("Usuario o contraseña incorrectos")
-
-    # ---- Registro
     with tab_register:
         st.subheader("Registro de nuevo usuario")
         new_user = st.text_input("Nuevo usuario")
@@ -127,15 +133,13 @@ if not st.session_state.logged_in:
                 st.error("Ese usuario ya existe")
             elif new_email in users["correo"].values:
                 st.error("Ese correo ya está registrado")
-            elif new_user.strip() == "" or new_pass.strip() == "" or new_name.strip() == "" or new_email.strip() == "":
+            elif any(x.strip() == "" for x in [new_user, new_pass, new_name, new_email]):
                 st.error("Todos los campos son obligatorios")
             else:
                 new_entry = pd.DataFrame([[new_user, new_pass, new_name, new_email]], columns=USER_COLS)
                 users = pd.concat([users, new_entry], ignore_index=True)
                 save_users(users)
                 st.success("Usuario registrado con éxito. Ahora puedes iniciar sesión.")
-
-    # ---- Recuperación
     with tab_reset:
         st.subheader("Recuperar contraseña")
         reset_user = st.text_input("Usuario para recuperar contraseña")
@@ -152,8 +156,6 @@ if not st.session_state.logged_in:
                         st.success("Se ha enviado un correo con el enlace de recuperación.")
             else:
                 st.error("Usuario no encontrado")
-
-    # ---- Link de recuperación
     params = st.query_params
     if "reset" in params:
         token = params["reset"]
@@ -168,7 +170,6 @@ if not st.session_state.logged_in:
                 del st.session_state.reset_tokens[token]
                 st.success("Contraseña cambiada con éxito. Ya puedes iniciar sesión.")
         st.stop()
-
     st.stop()
 
 # =========================
@@ -180,8 +181,6 @@ if st.sidebar.button("Cerrar sesión"):
     st.session_state.user = None
     st.session_state.name = None
     st.rerun()
-
-# ---- Opción de borrar cuenta (solo usuarios normales)
 if st.session_state.user not in ["teniente", "parquista"]:
     with st.sidebar.expander("⚠️ Borrar mi cuenta"):
         st.warning("Esta acción no se puede deshacer.")
@@ -196,8 +195,6 @@ if st.session_state.user not in ["teniente", "parquista"]:
                 st.rerun()
             else:
                 st.error("Debes confirmar para borrar tu cuenta.")
-
-# ---- Configurar correo (solo teniente/parquista)
 if st.session_state.user in ["teniente", "parquista"]:
     st.sidebar.subheader("📧 Configurar correo")
     users = load_users()
@@ -218,56 +215,65 @@ if st.session_state.user in ["teniente", "parquista"]:
 # =========================
 inv = load_inventory()
 log = load_log()
-
 tabs = ["📋 Inventario", "🔁 Movimientos"]
 if st.session_state.user in ["teniente", "parquista"]:
     tabs.append("📝 Historial")
 if st.session_state.user == "teniente":
     tabs.append("⚙️ Gestión de materiales")
-
 selected_tabs = st.tabs(tabs)
 
 # ---- Inventario
 with selected_tabs[0]:
     st.subheader("Estado actual")
     inv_view = inv.copy()
-    inv_view["disponible"] = inv_view["en_parque"]
+    inv_view["inoperativos"] = inv_view["cantidad_total"] - inv_view["operativos"]
     st.dataframe(inv_view, use_container_width=True)
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4, c5 = st.columns(5)
     with c1: st.metric("Total de materiales", len(inv_view))
     with c2: st.metric("Unidades en parque", int(inv_view["en_parque"].sum()))
     with c3: st.metric("Unidades fuera de parque", int(inv_view["fuera_parque"].sum()))
+    with c4: st.metric("Operativos", int(inv_view["operativos"].sum()))
+    with c5: st.metric("Inoperativos", int(inv_view["inoperativos"].sum()))
 
 # ---- Movimientos
 with selected_tabs[1]:
     st.subheader("Registrar movimiento")
     material = st.selectbox("Material", inv["material"])
     cant = st.number_input("Cantidad", min_value=1, step=1, value=1)
-    accion = st.radio("Acción", ["Sacar", "Devolver"], horizontal=True)
+    accion = st.radio("Acción", ["Sacar", "Devolver", "Marcar inoperativo"], horizontal=True)
     observ = st.text_input("Observación (opcional)", "")
+    descontar = False
+    if accion == "Marcar inoperativo":
+        descontar = st.checkbox("Descontar también del parque")
     if st.button("Confirmar movimiento", type="primary"):
         idx = inv.index[inv["material"] == material][0]
         if accion == "Sacar":
             if int(inv.loc[idx, "en_parque"]) >= cant:
-                inv.loc[idx, "en_parque"] -= int(cant)
-                inv.loc[idx, "fuera_parque"] += int(cant)
+                inv.loc[idx, "en_parque"] -= cant
+                inv.loc[idx, "fuera_parque"] += cant
                 st.success(f"Sacaste {cant} {material}")
             else:
-                st.error("No hay suficiente stock en parque")
-                st.stop()
-        else:
+                st.error("No hay suficiente stock en parque"); st.stop()
+        elif accion == "Devolver":
             if int(inv.loc[idx, "fuera_parque"]) >= cant:
-                inv.loc[idx, "fuera_parque"] -= int(cant)
-                inv.loc[idx, "en_parque"] += int(cant)
+                inv.loc[idx, "fuera_parque"] -= cant
+                inv.loc[idx, "en_parque"] += cant
                 st.success(f"Devolviste {cant} {material}")
             else:
-                st.error("No hay suficiente stock fuera del parque")
-                st.stop()
+                st.error("No hay suficiente stock fuera del parque"); st.stop()
+        elif accion == "Marcar inoperativo":
+            if int(inv.loc[idx, "operativos"]) >= cant:
+                inv.loc[idx, "operativos"] -= cant
+                if descontar and int(inv.loc[idx, "en_parque"]) >= cant:
+                    inv.loc[idx, "en_parque"] -= cant
+                st.success(f"Marcaste {cant} {material} como inoperativo")
+            else:
+                st.error("No hay suficientes materiales operativos"); st.stop()
         save_inventory(inv)
         nuevo = pd.DataFrame([{
             "usuario": st.session_state.user,
             "material": material,
-            "cantidad": int(cant),
+            "cantidad": cant,
             "accion": accion,
             "hora": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "observacion": observ
@@ -280,9 +286,9 @@ if "📝 Historial" in tabs:
     with selected_tabs[tabs.index("📝 Historial")]:
         st.subheader("Historial de movimientos")
         colf1, colf2, colf3 = st.columns(3)
-        with colf1: f_user = st.selectbox("Filtrar por usuario", ["(Todos)"] + log["usuario"].unique().tolist())
-        with colf2: f_mat = st.selectbox("Filtrar por material", ["(Todos)"] + sorted(inv["material"].unique().tolist()))
-        with colf3: f_acc = st.selectbox("Filtrar por acción", ["(Todas)", "Sacar", "Devolver", "Editar inventario"])
+        with colf1: f_user = st.selectbox("Usuario", ["(Todos)"] + log["usuario"].unique().tolist())
+        with colf2: f_mat = st.selectbox("Material", ["(Todos)"] + sorted(inv["material"].unique().tolist()))
+        with colf3: f_acc = st.selectbox("Acción", ["(Todas)", "Sacar", "Devolver", "Marcar inoperativo", "Editar inventario"])
         log_view = load_log().copy()
         if f_user != "(Todos)": log_view = log_view[log_view["usuario"] == f_user]
         if f_mat != "(Todos)": log_view = log_view[log_view["material"] == f_mat]
@@ -297,15 +303,16 @@ if "⚙️ Gestión de materiales" in tabs:
         if choice == "Añadir material nuevo":
             new_name = st.text_input("Nombre del material")
             new_total = st.number_input("Cantidad total", min_value=1, step=1, value=1)
-            new_unit = st.text_input("Unidad (ej: uds, kg, m)", "uds")
+            new_unit = st.text_input("Unidad", "uds")
             if st.button("Añadir material"):
                 if new_name.strip() == "":
                     st.error("El nombre no puede estar vacío")
                 elif new_name in inv["material"].values:
                     st.error("Ese material ya existe")
                 else:
-                    new_row = {"material": new_name, "cantidad_total": int(new_total),
-                               "en_parque": int(new_total), "fuera_parque": 0, "unidad": new_unit}
+                    new_row = {"material": new_name, "cantidad_total": new_total,
+                               "en_parque": new_total, "fuera_parque": 0,
+                               "operativos": new_total, "unidad": new_unit}
                     inv = pd.concat([inv, pd.DataFrame([new_row])], ignore_index=True)
                     save_inventory(inv)
                     log = pd.concat([log, pd.DataFrame([{
@@ -317,17 +324,18 @@ if "⚙️ Gestión de materiales" in tabs:
                         "observacion": "Añadido material nuevo"
                     }])], ignore_index=True)
                     save_log(log)
-                    st.success(f"Material '{new_name}' añadido con {new_total} {new_unit}")
+                    st.success(f"Material '{new_name}' añadido")
         else:
-            mat_edit = st.selectbox("Selecciona material a editar", inv["material"])
+            mat_edit = st.selectbox("Selecciona material", inv["material"])
             if mat_edit:
                 idx = inv.index[inv["material"] == mat_edit][0]
                 total_actual = int(inv.loc[idx, "cantidad_total"])
                 new_total = st.number_input("Nueva cantidad total", min_value=0, value=total_actual, step=1)
                 if st.button("Actualizar material"):
-                    diferencia = int(new_total) - total_actual
-                    inv.loc[idx, "cantidad_total"] = int(new_total)
+                    diferencia = new_total - total_actual
+                    inv.loc[idx, "cantidad_total"] = new_total
                     inv.loc[idx, "en_parque"] = max(0, inv.loc[idx, "en_parque"] + diferencia)
+                    inv.loc[idx, "operativos"] = max(0, inv.loc[idx, "operativos"] + diferencia)
                     save_inventory(inv)
                     log = pd.concat([log, pd.DataFrame([{
                         "usuario": st.session_state.user,
@@ -338,4 +346,4 @@ if "⚙️ Gestión de materiales" in tabs:
                         "observacion": f"Cantidad modificada (antes {total_actual}, ahora {new_total})"
                     }])], ignore_index=True)
                     save_log(log)
-                    st.success(f"Material '{mat_edit}' actualizado a {new_total} unidades")
+                    st.success(f"Material '{mat_edit}' actualizado")
