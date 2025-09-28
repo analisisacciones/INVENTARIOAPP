@@ -16,6 +16,7 @@ DATA_DIR = "data"
 INV_FILE = os.path.join(DATA_DIR, "inventario.csv")
 LOG_FILE = os.path.join(DATA_DIR, "movimientos.csv")
 USERS_FILE = os.path.join(DATA_DIR, "users.csv")
+SESSION_FILE = os.path.join(DATA_DIR, "session.csv")
 
 EMAIL_ADDRESS = st.secrets["EMAIL_ADDRESS"]
 EMAIL_PASSWORD = st.secrets["EMAIL_PASSWORD"]
@@ -69,6 +70,19 @@ def save_log(df): df.to_csv(LOG_FILE, index=False)
 def load_users(): return pd.read_csv(USERS_FILE)
 def save_users(df): df.to_csv(USERS_FILE, index=False)
 
+def load_session():
+    if os.path.exists(SESSION_FILE):
+        return pd.read_csv(SESSION_FILE)
+    return pd.DataFrame(columns=["usuario", "token"])
+
+def save_session(usuario, token):
+    df = pd.DataFrame([[usuario, token]], columns=["usuario", "token"])
+    df.to_csv(SESSION_FILE, index=False)
+
+def clear_session():
+    if os.path.exists(SESSION_FILE):
+        os.remove(SESSION_FILE)
+
 init_data()
 
 # =========================
@@ -102,6 +116,18 @@ if "logged_in" not in st.session_state:
 if "reset_tokens" not in st.session_state:
     st.session_state.reset_tokens = {}
 
+# Restaurar sesión persistente
+if not st.session_state.logged_in:
+    sess = load_session()
+    if not sess.empty:
+        usuario = sess.loc[0, "usuario"]
+        users = load_users()
+        if usuario in users["usuario"].values:
+            st.session_state.logged_in = True
+            st.session_state.user = usuario
+            st.session_state.name = users.loc[users["usuario"] == usuario, "nombre"].values[0]
+            st.session_state.token = sess.loc[0, "token"]
+
 # =========================
 # Pantalla de inicio
 # =========================
@@ -117,6 +143,9 @@ if not st.session_state.logged_in:
                 st.session_state.logged_in = True
                 st.session_state.user = usuario
                 st.session_state.name = users.loc[users["usuario"] == usuario, "nombre"].values[0]
+                token = secrets.token_urlsafe(16)
+                st.session_state.token = token
+                save_session(usuario, token)
                 st.success(f"Bienvenido {st.session_state.name}")
                 st.rerun()
             else:
@@ -180,6 +209,7 @@ if st.sidebar.button("Cerrar sesión"):
     st.session_state.logged_in = False
     st.session_state.user = None
     st.session_state.name = None
+    clear_session()
     st.rerun()
 if st.session_state.user not in ["teniente", "parquista"]:
     with st.sidebar.expander("⚠️ Borrar mi cuenta"):
@@ -192,6 +222,7 @@ if st.session_state.user not in ["teniente", "parquista"]:
                 save_users(users)
                 st.success("Tu cuenta ha sido eliminada.")
                 st.session_state.logged_in = False
+                clear_session()
                 st.rerun()
             else:
                 st.error("Debes confirmar para borrar tu cuenta.")
@@ -335,15 +366,3 @@ if "⚙️ Gestión de materiales" in tabs:
                     diferencia = new_total - total_actual
                     inv.loc[idx, "cantidad_total"] = new_total
                     inv.loc[idx, "en_parque"] = max(0, inv.loc[idx, "en_parque"] + diferencia)
-                    inv.loc[idx, "operativos"] = max(0, inv.loc[idx, "operativos"] + diferencia)
-                    save_inventory(inv)
-                    log = pd.concat([log, pd.DataFrame([{
-                        "usuario": st.session_state.user,
-                        "material": mat_edit,
-                        "cantidad": new_total,
-                        "accion": "Editar inventario",
-                        "hora": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "observacion": f"Cantidad modificada (antes {total_actual}, ahora {new_total})"
-                    }])], ignore_index=True)
-                    save_log(log)
-                    st.success(f"Material '{mat_edit}' actualizado")
