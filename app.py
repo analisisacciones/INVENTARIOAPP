@@ -123,15 +123,17 @@ if st.sidebar.button("Cerrar sesión"):
 inv = load_inventory()
 log = load_log()
 
-# Tabs (el historial solo visible a teniente y parquista)
+# Tabs
+tabs = ["📋 Inventario", "🔁 Movimientos"]
 if st.session_state.user in ["teniente", "parquista"]:
-    tab_inv, tab_mov, tab_hist = st.tabs(["📋 Inventario", "🔁 Movimientos", "📝 Historial"])
-else:
-    tab_inv, tab_mov = st.tabs(["📋 Inventario", "🔁 Movimientos"])
-    tab_hist = None
+    tabs.append("📝 Historial")
+if st.session_state.user == "teniente":
+    tabs.append("⚙️ Gestión de materiales")
+
+selected_tabs = st.tabs(tabs)
 
 # -------- Inventario
-with tab_inv:
+with selected_tabs[0]:
     st.subheader("Estado actual")
     inv_view = inv.copy()
     inv_view["disponible"] = inv_view["en_parque"]
@@ -145,7 +147,7 @@ with tab_inv:
         st.metric("Unidades fuera de parque", int(inv_view["fuera_parque"].sum()))
 
 # -------- Movimientos
-with tab_mov:
+with selected_tabs[1]:
     st.subheader("Registrar movimiento")
     material = st.selectbox("Material", inv["material"])
     cant = st.number_input("Cantidad", min_value=1, step=1, value=1)
@@ -185,8 +187,8 @@ with tab_mov:
         save_log(log)
 
 # -------- Historial (solo jefes)
-if tab_hist is not None:
-    with tab_hist:
+if "📝 Historial" in tabs:
+    with selected_tabs[tabs.index("📝 Historial")]:
         st.subheader("Historial de movimientos")
         colf1, colf2, colf3 = st.columns(3)
         with colf1:
@@ -194,7 +196,7 @@ if tab_hist is not None:
         with colf2:
             f_mat = st.selectbox("Filtrar por material", ["(Todos)"] + sorted(inv["material"].unique().tolist()))
         with colf3:
-            f_acc = st.selectbox("Filtrar por acción", ["(Todas)", "Sacar", "Devolver"])
+            f_acc = st.selectbox("Filtrar por acción", ["(Todas)", "Sacar", "Devolver", "Editar inventario"])
 
         log_view = load_log().copy()
         if f_user != "(Todos)":
@@ -205,3 +207,62 @@ if tab_hist is not None:
             log_view = log_view[log_view["accion"] == f_acc]
 
         st.dataframe(log_view.sort_values("hora", ascending=False), use_container_width=True)
+
+# -------- Gestión de materiales (solo teniente)
+if "⚙️ Gestión de materiales" in tabs:
+    with selected_tabs[tabs.index("⚙️ Gestión de materiales")]:
+        st.subheader("Gestión de materiales (solo Teniente)")
+
+        choice = st.radio("Acción", ["Añadir material nuevo", "Editar material existente"], horizontal=True)
+
+        if choice == "Añadir material nuevo":
+            new_name = st.text_input("Nombre del material")
+            new_total = st.number_input("Cantidad total", min_value=1, step=1, value=1)
+            new_unit = st.text_input("Unidad (ej: uds, kg, m)", "uds")
+            if st.button("Añadir material"):
+                if new_name.strip() == "":
+                    st.error("El nombre no puede estar vacío")
+                elif new_name in inv["material"].values:
+                    st.error("Ese material ya existe")
+                else:
+                    new_row = {
+                        "material": new_name,
+                        "cantidad_total": int(new_total),
+                        "en_parque": int(new_total),
+                        "fuera_parque": 0,
+                        "unidad": new_unit
+                    }
+                    inv = pd.concat([inv, pd.DataFrame([new_row])], ignore_index=True)
+                    save_inventory(inv)
+                    log = pd.concat([log, pd.DataFrame([{
+                        "usuario": st.session_state.user,
+                        "material": new_name,
+                        "cantidad": new_total,
+                        "accion": "Editar inventario",
+                        "hora": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "observacion": "Añadido material nuevo"
+                    }])], ignore_index=True)
+                    save_log(log)
+                    st.success(f"Material '{new_name}' añadido con {new_total} {new_unit}")
+
+        else:  # Editar material
+            mat_edit = st.selectbox("Selecciona material a editar", inv["material"])
+            if mat_edit:
+                idx = inv.index[inv["material"] == mat_edit][0]
+                total_actual = int(inv.loc[idx, "cantidad_total"])
+                new_total = st.number_input("Nueva cantidad total", min_value=0, value=total_actual, step=1)
+                if st.button("Actualizar material"):
+                    diferencia = int(new_total) - total_actual
+                    inv.loc[idx, "cantidad_total"] = int(new_total)
+                    inv.loc[idx, "en_parque"] = max(0, inv.loc[idx, "en_parque"] + diferencia)
+                    save_inventory(inv)
+                    log = pd.concat([log, pd.DataFrame([{
+                        "usuario": st.session_state.user,
+                        "material": mat_edit,
+                        "cantidad": new_total,
+                        "accion": "Editar inventario",
+                        "hora": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "observacion": f"Cantidad modificada (antes {total_actual}, ahora {new_total})"
+                    }])], ignore_index=True)
+                    save_log(log)
+                    st.success(f"Material '{mat_edit}' actualizado a {new_total} unidades")
