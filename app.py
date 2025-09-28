@@ -6,7 +6,7 @@ from datetime import datetime
 # =========================
 # Configuración básica
 # =========================
-st.set_page_config(page_title="Inventario Académico", page_icon="📦", layout="wide")
+st.set_page_config(page_title="Parque de zapadores IIScc", page_icon="📦", layout="wide")
 
 DATA_DIR = "data"
 INV_FILE = os.path.join(DATA_DIR, "inventario.csv")
@@ -72,7 +72,7 @@ if "logged_in" not in st.session_state:
     st.session_state.user = None
     st.session_state.name = None
 
-st.title("📦 Inventario Académico — Control de Parque")
+st.title("📦 Parque de zapadores IIScc")
 
 if not st.session_state.logged_in:
     tab_login, tab_register = st.tabs(["🔑 Iniciar sesión", "📝 Registrarse"])
