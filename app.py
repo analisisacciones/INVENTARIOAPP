@@ -16,9 +16,10 @@ LOG_FILE = os.path.join(DATA_DIR, "movimientos.csv")
 USERS_FILE = os.path.join(DATA_DIR, "users.csv")
 TOKENS_FILE = os.path.join(DATA_DIR, "reset_tokens.csv")
 
-# Gmail emisor
-EMAIL_ADDRESS = "parquezapadores@gmail.com"
-EMAIL_PASSWORD = "ytzlpuwsipisfahh"  # tu contraseña de aplicación
+# Variables seguras desde Streamlit Secrets
+EMAIL_ADDRESS = st.secrets["EMAIL_ADDRESS"]
+EMAIL_PASSWORD = st.secrets["EMAIL_PASSWORD"]
+BASE_URL = st.secrets["BASE_URL"]
 
 # Usuarios iniciales
 DEFAULT_USERS = [
@@ -67,7 +68,7 @@ init_data()
 # Email
 # =========================
 def send_recovery_email(to_email, user, token):
-    reset_link = f"{st.secrets.get('url','https://inventarioapp.streamlit.app')}?reset={token}"
+    reset_link = f"{BASE_URL}?reset={token}"
     msg = MIMEText(f"Hola {user},\n\nHaz clic en este enlace para restablecer tu contraseña:\n{reset_link}\n\nEste enlace caduca en 30 minutos.")
     msg["Subject"] = "Recuperación de contraseña - Parque de zapadores IIScc"
     msg["From"] = EMAIL_ADDRESS
