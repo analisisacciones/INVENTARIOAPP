@@ -1,12 +1,9 @@
 import streamlit as st
 import pandas as pd
 import os
-import smtplib
-import ssl
+from datetime import datetime, timedelta
+import uuid, smtplib, ssl
 from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from datetime import datetime
-import secrets
 
 # =========================
 # Configuración básica
@@ -17,16 +14,16 @@ DATA_DIR = "data"
 INV_FILE = os.path.join(DATA_DIR, "inventario.csv")
 LOG_FILE = os.path.join(DATA_DIR, "movimientos.csv")
 USERS_FILE = os.path.join(DATA_DIR, "users.csv")
-TOKENS_FILE = os.path.join(DATA_DIR, "tokens.csv")
+TOKENS_FILE = os.path.join(DATA_DIR, "reset_tokens.csv")
 
-# Email de la aplicación
-APP_EMAIL = "parquezapadores@gmail.com"
-APP_PASSWORD = "ytzl puws ipis fahh"  # tu contraseña de aplicación generada
+# Gmail emisor
+EMAIL_ADDRESS = "parquezapadores@gmail.com"
+EMAIL_PASSWORD = "ytzlpuwsipisfahh"  # tu contraseña de aplicación
 
 # Usuarios iniciales
 DEFAULT_USERS = [
-    {"usuario": "teniente", "password": "jefe1", "nombre": "Teniente"},
-    {"usuario": "parquista", "password": "encargado1", "nombre": "Parquista"}
+    {"usuario": "teniente", "password": "jefe1", "nombre": "Teniente", "correo": "teniente@correo.com"},
+    {"usuario": "parquista", "password": "encargado1", "nombre": "Parquista", "correo": "parquista@correo.com"}
 ]
 
 INVENTARIO_BASE = [
@@ -39,8 +36,7 @@ INVENTARIO_BASE = [
 
 INV_COLS = ["material", "cantidad_total", "en_parque", "fuera_parque", "unidad"]
 LOG_COLS = ["usuario", "material", "cantidad", "accion", "hora", "observacion"]
-USER_COLS = ["usuario", "password", "nombre"]
-TOKEN_COLS = ["usuario", "token"]
+USER_COLS = ["usuario", "password", "nombre", "correo"]
 
 # =========================
 # Funciones de datos
@@ -54,66 +50,32 @@ def init_data():
     if not os.path.exists(USERS_FILE):
         pd.DataFrame(DEFAULT_USERS, columns=USER_COLS).to_csv(USERS_FILE, index=False)
     if not os.path.exists(TOKENS_FILE):
-        pd.DataFrame(columns=TOKEN_COLS).to_csv(TOKENS_FILE, index=False)
+        pd.DataFrame(columns=["usuario", "token", "expira"]).to_csv(TOKENS_FILE, index=False)
 
-def load_inventory():
-    return pd.read_csv(INV_FILE)
+def load_inventory(): return pd.read_csv(INV_FILE)
+def save_inventory(df): df.to_csv(INV_FILE, index=False)
+def load_log(): return pd.read_csv(LOG_FILE)
+def save_log(df): df.to_csv(LOG_FILE, index=False)
+def load_users(): return pd.read_csv(USERS_FILE)
+def save_users(df): df.to_csv(USERS_FILE, index=False)
+def load_tokens(): return pd.read_csv(TOKENS_FILE)
+def save_tokens(df): df.to_csv(TOKENS_FILE, index=False)
 
-def save_inventory(df):
-    df.to_csv(INV_FILE, index=False)
-
-def load_log():
-    return pd.read_csv(LOG_FILE)
-
-def save_log(df):
-    df.to_csv(LOG_FILE, index=False)
-
-def load_users():
-    return pd.read_csv(USERS_FILE)
-
-def save_users(df):
-    df.to_csv(USERS_FILE, index=False)
-
-def load_tokens():
-    return pd.read_csv(TOKENS_FILE)
-
-def save_tokens(df):
-    df.to_csv(TOKENS_FILE, index=False)
-
-# Inicializa almacenamiento
 init_data()
 
 # =========================
-# Funciones email
+# Email
 # =========================
-def send_recovery_email(to_email, usuario, token):
-    try:
-        link = f"{st.secrets.get('APP_URL', 'http://localhost:8501')}?reset={token}"
-        message = MIMEMultipart("alternative")
-        message["Subject"] = "Recuperación de contraseña - Parque de zapadores IIScc"
-        message["From"] = APP_EMAIL
-        message["To"] = to_email
-
-        html = f"""
-        <html>
-          <body>
-            <p>Hola {usuario},</p>
-            <p>Has solicitado restablecer tu contraseña. Haz clic en el siguiente enlace:</p>
-            <p><a href="{link}">Restablecer contraseña</a></p>
-            <p>Si no solicitaste este cambio, ignora este mensaje.</p>
-          </body>
-        </html>
-        """
-        message.attach(MIMEText(html, "html"))
-
-        context = ssl.create_default_context()
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
-            server.login(APP_EMAIL, APP_PASSWORD)
-            server.sendmail(APP_EMAIL, to_email, message.as_string())
-        return True
-    except Exception as e:
-        st.error(f"Error al enviar email: {e}")
-        return False
+def send_recovery_email(to_email, user, token):
+    reset_link = f"{st.secrets.get('url','https://inventarioapp.streamlit.app')}?reset={token}"
+    msg = MIMEText(f"Hola {user},\n\nHaz clic en este enlace para restablecer tu contraseña:\n{reset_link}\n\nEste enlace caduca en 30 minutos.")
+    msg["Subject"] = "Recuperación de contraseña - Parque de zapadores IIScc"
+    msg["From"] = EMAIL_ADDRESS
+    msg["To"] = to_email
+    context = ssl.create_default_context()
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
+        server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
+        server.sendmail(EMAIL_ADDRESS, to_email, msg.as_string())
 
 # =========================
 # Login / Registro
@@ -123,29 +85,33 @@ if "logged_in" not in st.session_state:
     st.session_state.user = None
     st.session_state.name = None
 
-st.title("Parque de zapadores IIScc")
-
-# Detectar token en URL (usamos st.query_params en vez de experimental)
 query_params = st.query_params
 if "reset" in query_params:
     token = query_params["reset"]
     tokens = load_tokens()
+    users = load_users()
     if token in tokens["token"].values:
-        usuario = tokens.loc[tokens["token"] == token, "usuario"].values[0]
-        new_pass = st.text_input("Nueva contraseña", type="password")
-        if st.button("Guardar nueva contraseña"):
-            users = load_users()
-            users.loc[users["usuario"] == usuario, "password"] = new_pass
-            save_users(users)
-            tokens = tokens[tokens["token"] != token]
-            save_tokens(tokens)
-            st.success("Contraseña cambiada con éxito. Ya puedes iniciar sesión.")
+        row = tokens.loc[tokens["token"] == token].iloc[0]
+        if datetime.now() < datetime.fromisoformat(row["expira"]):
+            st.subheader("🔒 Restablecer contraseña")
+            new_pass = st.text_input("Nueva contraseña", type="password")
+            if st.button("Guardar nueva contraseña"):
+                users.loc[users["usuario"] == row["usuario"], "password"] = new_pass
+                save_users(users)
+                tokens = tokens[tokens["token"] != token]
+                save_tokens(tokens)
+                st.success("Contraseña cambiada con éxito. Ya puedes iniciar sesión.")
+        else:
+            st.error("El enlace ha caducado.")
+    else:
+        st.error("Token inválido.")
     st.stop()
 
-if not st.session_state.logged_in:
-    tab_login, tab_register, tab_recover = st.tabs(["🔑 Iniciar sesión", "📝 Registrarse", "🔒 Cambiar contraseña"])
+st.title("Parque de zapadores IIScc")
 
-    # --- LOGIN
+if not st.session_state.logged_in:
+    tab_login, tab_register, tab_reset = st.tabs(["🔑 Iniciar sesión", "📝 Registrarse", "🔒 Cambiar contraseña"])
+
     with tab_login:
         st.subheader("Inicia sesión")
         users = load_users()
@@ -160,37 +126,44 @@ if not st.session_state.logged_in:
             else:
                 st.error("Usuario o contraseña incorrectos")
 
-    # --- REGISTRO
     with tab_register:
         st.subheader("Registro de nuevo usuario")
         new_user = st.text_input("Nuevo usuario")
         new_pass = st.text_input("Nueva contraseña", type="password")
         new_name = st.text_input("Nombre completo")
+        new_email = st.text_input("Correo electrónico")
         if st.button("Registrar", use_container_width=True):
             users = load_users()
             if new_user in users["usuario"].values:
                 st.error("Ese usuario ya existe")
-            elif new_user.strip() == "" or new_pass.strip() == "" or new_name.strip() == "":
+            elif new_email in users["correo"].values:
+                st.error("Ese correo ya está registrado")
+            elif new_user.strip() == "" or new_pass.strip() == "" or new_name.strip() == "" or new_email.strip() == "":
                 st.error("Todos los campos son obligatorios")
             else:
-                new_entry = pd.DataFrame([[new_user, new_pass, new_name]], columns=USER_COLS)
+                new_entry = pd.DataFrame([[new_user, new_pass, new_name, new_email]], columns=USER_COLS)
                 users = pd.concat([users, new_entry], ignore_index=True)
                 save_users(users)
                 st.success("Usuario registrado con éxito. Ahora puedes iniciar sesión.")
 
-    # --- RECUPERAR CONTRASEÑA
-    with tab_recover:
+    with tab_reset:
         st.subheader("Recuperar contraseña")
-        usuario_rec = st.text_input("Usuario para recuperar contraseña")
+        usuario = st.text_input("Usuario para recuperar contraseña")
         if st.button("Enviar correo de recuperación"):
             users = load_users()
-            if usuario_rec in users["usuario"].values:
-                token = secrets.token_urlsafe(16)
+            if usuario in users["usuario"].values:
+                correo = users.loc[users["usuario"] == usuario, "correo"].values[0]
+                token = str(uuid.uuid4())
+                expira = datetime.now() + timedelta(minutes=30)
                 tokens = load_tokens()
-                tokens = pd.concat([tokens, pd.DataFrame([[usuario_rec, token]], columns=TOKEN_COLS)], ignore_index=True)
+                nuevo = pd.DataFrame([[usuario, token, expira.isoformat()]], columns=["usuario", "token", "expira"])
+                tokens = pd.concat([tokens, nuevo], ignore_index=True)
                 save_tokens(tokens)
-                if send_recovery_email(usuario_rec, usuario_rec, token):
-                    st.success("Correo de recuperación enviado.")
+                try:
+                    send_recovery_email(correo, usuario, token)
+                    st.success("Correo enviado con instrucciones para restablecer tu contraseña.")
+                except Exception as e:
+                    st.error(f"Error al enviar el correo: {e}")
             else:
                 st.error("Usuario no encontrado")
 
@@ -200,25 +173,20 @@ if not st.session_state.logged_in:
 # App principal
 # =========================
 st.sidebar.success(f"Conectado como {st.session_state.name} ({st.session_state.user})")
-
-# Opción eliminar cuenta
-if st.sidebar.button("🗑️ Eliminar mi cuenta"):
-    if st.session_state.user in ["teniente", "parquista"]:
-        st.error("No puedes eliminar este usuario fijo.")
-    else:
-        users = load_users()
-        users = users[users["usuario"] != st.session_state.user]
-        save_users(users)
-        st.success("Tu cuenta ha sido eliminada.")
-        st.session_state.logged_in = False
-        st.session_state.user = None
-        st.session_state.name = None
-        st.rerun()
-
 if st.sidebar.button("Cerrar sesión"):
     st.session_state.logged_in = False
     st.session_state.user = None
     st.session_state.name = None
+    st.rerun()
+
+if st.sidebar.button("🗑️ Borrar mi cuenta"):
+    users = load_users()
+    users = users[users["usuario"] != st.session_state.user]
+    save_users(users)
+    st.session_state.logged_in = False
+    st.session_state.user = None
+    st.session_state.name = None
+    st.success("Tu cuenta ha sido eliminada.")
     st.rerun()
 
 inv = load_inventory()
@@ -254,7 +222,6 @@ with selected_tabs[1]:
     cant = st.number_input("Cantidad", min_value=1, step=1, value=1)
     accion = st.radio("Acción", ["Sacar", "Devolver"], horizontal=True)
     observ = st.text_input("Observación (opcional)", "")
-
     if st.button("Confirmar movimiento", type="primary"):
         idx = inv.index[inv["material"] == material][0]
         if accion == "Sacar":
@@ -265,7 +232,7 @@ with selected_tabs[1]:
             else:
                 st.error("No hay suficiente stock en parque")
                 st.stop()
-        else:  # Devolver
+        else:
             if int(inv.loc[idx, "fuera_parque"]) >= cant:
                 inv.loc[idx, "fuera_parque"] -= int(cant)
                 inv.loc[idx, "en_parque"] += int(cant)
@@ -273,8 +240,6 @@ with selected_tabs[1]:
             else:
                 st.error("No hay suficiente stock fuera del parque")
                 st.stop()
-
-        # Guarda inventario y log
         save_inventory(inv)
         nuevo = pd.DataFrame([{
             "usuario": st.session_state.user,
@@ -287,7 +252,7 @@ with selected_tabs[1]:
         log = pd.concat([load_log(), nuevo], ignore_index=True)
         save_log(log)
 
-# -------- Historial (solo jefes)
+# -------- Historial
 if "📝 Historial" in tabs:
     with selected_tabs[tabs.index("📝 Historial")]:
         st.subheader("Historial de movimientos")
@@ -298,7 +263,6 @@ if "📝 Historial" in tabs:
             f_mat = st.selectbox("Filtrar por material", ["(Todos)"] + sorted(inv["material"].unique().tolist()))
         with colf3:
             f_acc = st.selectbox("Filtrar por acción", ["(Todas)", "Sacar", "Devolver", "Editar inventario"])
-
         log_view = load_log().copy()
         if f_user != "(Todos)":
             log_view = log_view[log_view["usuario"] == f_user]
@@ -306,16 +270,13 @@ if "📝 Historial" in tabs:
             log_view = log_view[log_view["material"] == f_mat]
         if f_acc != "(Todas)":
             log_view = log_view[log_view["accion"] == f_acc]
-
         st.dataframe(log_view.sort_values("hora", ascending=False), use_container_width=True)
 
-# -------- Gestión de materiales (solo teniente)
+# -------- Gestión materiales
 if "⚙️ Gestión de materiales" in tabs:
     with selected_tabs[tabs.index("⚙️ Gestión de materiales")]:
         st.subheader("Gestión de materiales (solo Teniente)")
-
         choice = st.radio("Acción", ["Añadir material nuevo", "Editar material existente"], horizontal=True)
-
         if choice == "Añadir material nuevo":
             new_name = st.text_input("Nombre del material")
             new_total = st.number_input("Cantidad total", min_value=1, step=1, value=1)
@@ -345,8 +306,7 @@ if "⚙️ Gestión de materiales" in tabs:
                     }])], ignore_index=True)
                     save_log(log)
                     st.success(f"Material '{new_name}' añadido con {new_total} {new_unit}")
-
-        else:  # Editar material
+        else:
             mat_edit = st.selectbox("Selecciona material a editar", inv["material"])
             if mat_edit:
                 idx = inv.index[inv["material"] == mat_edit][0]
